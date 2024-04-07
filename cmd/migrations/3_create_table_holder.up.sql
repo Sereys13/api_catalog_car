@@ -1,0 +1,6 @@
+CREATE TABLE IF NOT EXISTS holder (
+	id SERIAL PRIMARY KEY,
+	name VARCHAR(50) NOT NULL,
+	surname VARCHAR(50) NOT NULL,
+	patronymic VARCHAR(50)
+);
