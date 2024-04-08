@@ -6,9 +6,9 @@
 1) Создание структуры базы данных(postgres) при запуске api путем миграции.  
 Миграция реализована с помощью пакета [golang-migrate](https://github.com/golang-migrate/migrate)  
 Драйвер для работы с postgres [pgx](https://github.com/jackc/pgx)
-3) Логирование уровнем info
-Реализовано с помощью [logrus](github.com/sirupsen/logrus)
-4) Маршрутизация запросов
+2) Логирование уровнем info
+Реализовано с помощью пакета [logrus](github.com/sirupsen/logrus)
+3) Маршрутизация запросов
 Реализовано с помощью  [gorilla/mux](https://github.com/gorilla/mux)
 5) Чтение конфигурации api из config.env
 Работа с env файлами реализована с помощью пакета [joho/godotenv] (https://github.com/joho/godotenv)
