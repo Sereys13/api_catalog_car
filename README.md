@@ -1,10 +1,10 @@
 # Описание
-(Проект находится на стадии доработки)
-Это REST api реализующее каталог автомобилей.
+(Проект находится на стадии доработки)  
+Это REST api реализующее каталог автомобилей с использованием базы данных Postgres.  
 Данный проект является тестовым заданием для компании [Effective Mobile](https://effective-mobile.ru/)
 # В данном api реализовано:
-1) Создание структуры базы данных(postgres) при запуске api путем миграции.
-Реализована с помощью [golang-migrate](https://github.com/golang-migrate/migrate)
+1) Создание структуры базы данных(postgres) при запуске api путем миграции.  
+Миграция реализована с помощью пакета [golang-migrate](https://github.com/golang-migrate/migrate)  
 Драйвер для работы с postgres [pgx](https://github.com/jackc/pgx)
 3) Логирование уровнем info
 Реализовано с помощью [logrus](github.com/sirupsen/logrus)
