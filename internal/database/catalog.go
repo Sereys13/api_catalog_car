@@ -36,8 +36,12 @@ func (d *DB) IssuanceCatalog(ctx context.Context, page int, filtrYear string) (*
 		d.logger.Info(err)
 		return nil, err
 	}
-	pc.LastInd = pc.Catalog[len(pc.Catalog)-1].Id
-	return &pc, err
+	if len(pc.Catalog) != 0 {
+		pc.LastInd = pc.Catalog[len(pc.Catalog)-1].Id
+		return &pc, err
+	} else {
+		return nil, err
+	}
 }
 
 func (d *DB) IssuanceCatalogBrand(ctx context.Context, page int, brandId string, filtrYear string) (*PageCatalog, error) {
@@ -69,8 +73,12 @@ func (d *DB) IssuanceCatalogBrand(ctx context.Context, page int, brandId string,
 		d.logger.Info(err)
 		return nil, err
 	}
-	pc.LastInd = pc.Catalog[len(pc.Catalog)-1].Id
-	return &pc, err
+	if len(pc.Catalog) != 0 {
+		pc.LastInd = pc.Catalog[len(pc.Catalog)-1].Id
+		return &pc, err
+	} else {
+		return nil, err
+	}
 }
 
 func (d *DB) IssuanceCatalogModel(ctx context.Context, page int, brandId, modelId string, filtrYear string) (*PageCatalog, error) {
@@ -102,8 +110,12 @@ func (d *DB) IssuanceCatalogModel(ctx context.Context, page int, brandId, modelI
 		d.logger.Info(err)
 		return nil, err
 	}
-	pc.LastInd = pc.Catalog[len(pc.Catalog)-1].Id
-	return &pc, err
+	if len(pc.Catalog) != 0 {
+		pc.LastInd = pc.Catalog[len(pc.Catalog)-1].Id
+		return &pc, err
+	} else {
+		return nil, err
+	}
 }
 
 func (d *DB) DeleteItemsCatalog(ctx context.Context, idItems string) error {
