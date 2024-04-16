@@ -1,6 +1,7 @@
 package logging
 
 import (
+	"api_catalog_car/internal/config"
 	"fmt"
 	"io"
 	"log"
@@ -45,7 +46,7 @@ func (l *Logger) GetLoggerWithField(k string, v interface{}) *Logger {
 	return &Logger{l.WithField(k, v)}
 }
 
-func init() {
+func CreateLogger(cfgLogs *config.Logs) {
 	l := logrus.New()
 	l.SetReportCaller(true)
 	l.Formatter = &logrus.TextFormatter{
@@ -56,11 +57,11 @@ func init() {
 		DisableColors: false,
 		FullTimestamp: true,
 	}
-	err := os.MkdirAll("../logs", 1369)
+	err := os.MkdirAll(cfgLogs.PathLog, 1369)
 	if err != nil {
 		log.Fatal(err)
 	}
-	allFile, err := os.OpenFile("../logs/all.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 1365)
+	allFile, err := os.OpenFile(cfgLogs.PathLog+"/"+cfgLogs.NameFileLOg, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 1365)
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -3,8 +3,10 @@ package api
 import (
 	"api_catalog_car/internal/database"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
+	"regexp"
 	"strconv"
 
 	"github.com/gorilla/mux"
@@ -184,9 +186,19 @@ func (a *Api) AddItemsCatalog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var resp *http.Response
-	for _, el := range regNums.RegNums {
-		//Тут надо указать действительный url
-		resp, err = http.Get("url_api/info?regNum=" + el)
+	reg, err := regexp.Compile("[A-Z][0-9]{3}[A-Z]{2}[0-9]{2}[0-9]?")
+	if err != nil {
+		a.logger.Info(err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	for _, el := range regNums.RegNums { 
+		if !reg.MatchString(el){
+			a.logger.Info(errors.New("Number "+el+ " no validation"))
+		    w.WriteHeader(http.StatusBadRequest)
+			continue
+		}
+		resp, err = http.Get(a.urlApiCarInfo + el)
 		if err != nil {
 			a.logger.Info(err)
 			w.WriteHeader(http.StatusBadGateway)

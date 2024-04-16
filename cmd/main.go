@@ -6,6 +6,7 @@ import (
 	"api_catalog_car/internal/database"
 	"api_catalog_car/internal/migration"
 	"embed"
+	"log"
 
 	"api_catalog_car/pkg/logging"
 	"context"
@@ -21,14 +22,14 @@ import (
 var MigrationsFS embed.FS
 
 func main() {
-	logger := logging.GetLogger()
-	logger.Info("Creat logger")
-
-	logger.Info("Load config")
 	cfg, err := config.GetConfig()
 	if err != nil {
-		logger.Fatal("Failed loading config.env error = ", err)
+		log.Fatal(err)
 	}
+	logging.CreateLogger(&cfg.Logs)
+	logger := logging.GetLogger()
+	logger.Info("Load config")
+	logger.Info("Creat logger")
 	ctx := context.Background()
 
 	logger.Info("Migrations database Postgres")
@@ -54,7 +55,7 @@ func main() {
 	}
 	defer db.Close(ctx)
 
-	a := api.NewApi(ctx, db, logger)
+	a := api.NewApi(ctx, db, logger, cfg.UrlApiCarInfo)
 
 	logger.Info("Create router")
 	r := mux.NewRouter()

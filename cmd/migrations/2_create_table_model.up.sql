@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS model (
 	id SERIAL PRIMARY KEY,
 	name VARCHAR(50) NOT NULL,
-	brand INT REFERENCES brand(id)
+	brand INT REFERENCES brand(id) NOT NULL
 );

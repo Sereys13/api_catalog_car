@@ -13,10 +13,11 @@ type Api struct {
 	ctx    context.Context
 	db     *database.DB
 	logger *logging.Logger
+	urlApiCarInfo string
 }
 
-func NewApi(ctx context.Context, db *pgx.Conn, logger *logging.Logger) *Api {
-	return &Api{ctx: ctx, db: database.NewDataBase(db, logger), logger: logger}
+func NewApi(ctx context.Context, db *pgx.Conn, logger *logging.Logger, otherApi string) *Api {
+	return &Api{ctx: ctx, db: database.NewDataBase(db, logger), logger: logger, urlApiCarInfo: otherApi}
 }
 
 func (a *Api) Routes(r *mux.Router) {

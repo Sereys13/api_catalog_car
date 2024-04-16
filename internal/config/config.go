@@ -21,9 +21,17 @@ type Storage struct {
 	Sslmode  string
 }
 
+type Logs struct{
+	PathLog string
+	NameFileLOg string
+}
+
+
 type Config struct {
 	Listen  Listen
 	Storage Storage
+	Logs Logs
+	UrlApiCarInfo string
 }
 
 func GetConfig() (*Config, error) {
@@ -41,5 +49,9 @@ func GetConfig() (*Config, error) {
 			User:     os.Getenv("DB_USER"),
 			Password: os.Getenv("DB_PASSWORD"),
 			DbName:   os.Getenv("DB_NAME"),
-			Sslmode:  os.Getenv("DB_SSLMODE")}}, nil
+			Sslmode:  os.Getenv("DB_SSLMODE")},
+		Logs: Logs{
+			PathLog: os.Getenv("PATCH_LOG"),
+			NameFileLOg: os.Getenv("NAME_LOG")},
+		UrlApiCarInfo: os.Getenv("URL_API_CAR_INFO"),}, nil
 }
