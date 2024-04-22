@@ -56,3 +56,8 @@ type Model struct {
 	Id   int    `json:"id"`
 	Name string `json:"name"`
 }
+
+type IdObject struct{
+	IdBrand string
+	IdModel string
+}

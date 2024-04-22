@@ -3,71 +3,42 @@ package database
 import (
 	"context"
 	"errors"
-	"github.com/jackc/pgx/v5"
 	"strconv"
+
+	"github.com/jackc/pgx/v5"
 )
 
-func (d *DB) IssuanceCatalog(ctx context.Context, page int, filtrYear string) (*PageCatalog, error) {
+func (d *DB) IssuanceCatalog(ctx context.Context, idObj *IdObject , page int) (*PageCatalog, error) {
 	var row pgx.Rows
 	var err error
-	if filtrYear != "" {
+	if idObj.IdModel != ""{
 		row, err = d.db.Query(ctx, `SELECT cc.id, cc.regnum, b.name, m.name, cc.year_issue, 
        CONCAT(h.surname, ' ', h.Name, ' ', h.patronymic) AS fullName FROM car_catalog cc
 	   JOIN brand b ON cc.brand = b.id 
 	   JOIN model m ON cc.model = m.id 
 	   JOIN holder h ON cc.holder = h.id 
-	   WHERE cc.delete_status = false AND cc.id > $1 AND cc.year_issue = $2 ORDER BY cc.id ASC LIMIT 10`, page, filtrYear)
-	} else {
-		row, err = d.db.Query(ctx, `SELECT cc.id, cc.regnum, b.name, m.name, cc.year_issue, 
-       CONCAT(h.surname, ' ', h.Name, ' ', h.patronymic) AS fullName FROM car_catalog cc
-	   JOIN brand b ON cc.brand = b.id 
-	   JOIN model m ON cc.model = m.id 
-	   JOIN holder h ON cc.holder = h.id 
-	   WHERE cc.delete_status = false AND cc.id > $1 ORDER BY cc.id ASC LIMIT 10`, page)
-	}
-	if err != nil {
-		d.logger.Info(err)
-		return nil, err
-	}
-	var pc PageCatalog
-	pc.Catalog = make([]Catalog, 0, 20)
-	pc.Catalog, err = pgx.CollectRows(row, pgx.RowToStructByPos[Catalog])
-	if err != nil {
-		d.logger.Info(err)
-		return nil, err
-	}
-	if len(pc.Catalog) != 0 {
-		pc.LastInd = pc.Catalog[len(pc.Catalog)-1].Id
-		return &pc, err
-	} else {
-		return nil, err
-	}
-}
-
-func (d *DB) IssuanceCatalogBrand(ctx context.Context, page int, brandId string, filtrYear string) (*PageCatalog, error) {
-	var row pgx.Rows
-	var err error
-	if filtrYear != "" {
-		row, err = d.db.Query(ctx, `SELECT cc.id, cc.regnum, b.name, m.name, cc.year_issue, 
-       CONCAT(h.surname, ' ', h.Name, ' ', h.patronymic) AS fullName FROM car_catalog cc
-	   JOIN brand b ON cc.brand = b.id 
-	   JOIN model m ON cc.model = m.id 
-	   JOIN holder h ON cc.holder = h.id 
-	   WHERE cc.delete_status = false AND cc.id > $1 AND cc.year_issue = $2 AND cc.brand = $3 ORDER BY cc.id ASC LIMIT 10`, page, filtrYear, brandId)
-	} else {
+	   WHERE cc.delete_status = false AND cc.brand = $1 AND cc.Model = $2 AND cc.id > $3 ORDER BY cc.id ASC LIMIT 10`, idObj.IdBrand, idObj.IdModel, page)
+	} else if idObj.IdBrand != ""{
 		row, err = d.db.Query(ctx, `SELECT cc.id, cc.regnum, b.name, m.name, cc.year_issue, 
         CONCAT(h.surname, ' ', h.Name, ' ', h.patronymic) AS fullName FROM car_catalog cc
 		JOIN brand b ON cc.brand = b.id 
 		JOIN model m ON cc.model = m.id 
 		JOIN holder h ON cc.holder = h.id 
-		WHERE cc.delete_status = false AND cc.brand = $1 AND cc.id > $2 ORDER BY cc.id ASC LIMIT 10`, brandId, page)
+		WHERE cc.delete_status = false AND cc.brand = $1 AND cc.id > $2 ORDER BY cc.id ASC LIMIT 10`, idObj.IdBrand, page)
+	} else {
+		row, err = d.db.Query(ctx, `SELECT cc.id, cc.regnum, b.name, m.name, cc.year_issue, 
+			CONCAT(h.surname, ' ', h.Name, ' ', h.patronymic) AS fullName FROM car_catalog cc
+			JOIN brand b ON cc.brand = b.id 
+			JOIN model m ON cc.model = m.id 
+			JOIN holder h ON cc.holder = h.id 
+			WHERE cc.delete_status = false AND cc.id > $1 ORDER BY cc.id ASC LIMIT 10`, page)
 	}
 	if err != nil {
 		d.logger.Info(err)
 		return nil, err
 	}
 	var pc PageCatalog
-	pc.Catalog = make([]Catalog, 0, 20)
+	pc.Catalog = make([]Catalog, 0, 10)
 	pc.Catalog, err = pgx.CollectRows(row, pgx.RowToStructByPos[Catalog])
 	if err != nil {
 		d.logger.Info(err)
@@ -81,30 +52,62 @@ func (d *DB) IssuanceCatalogBrand(ctx context.Context, page int, brandId string,
 	}
 }
 
-func (d *DB) IssuanceCatalogModel(ctx context.Context, page int, brandId, modelId string, filtrYear string) (*PageCatalog, error) {
+func (d *DB) IssuanceCatalogSort(ctx context.Context, idObj *IdObject , year, nameSort string, page int) (*PageCatalog, error) {
+	if page != 0 {
+		return d.IssuanceCatalogSortPage(ctx, idObj, year, nameSort, page)
+	}
 	var row pgx.Rows
 	var err error
-	if filtrYear != "" {
-		row, err = d.db.Query(ctx, `SELECT cc.id, cc.regnum, b.name, m.name, cc.year_issue, 
-          CONCAT(h.surname, ' ', h.Name, ' ', h.patronymic) AS fullName FROM car_catalog cc
-	      JOIN brand b ON cc.brand = b.id 
-	      JOIN model m ON cc.model = m.id 
-	      JOIN holder h ON cc.holder = h.id 
-	      WHERE cc.delete_status = false AND cc.id > $1 AND cc.year_issue = $2 AND cc.brand = $3 AND cc.Model = $4 ORDER BY cc.id ASC LIMIT 10`, page, filtrYear, brandId, modelId)
-	} else {
+	querySort := ` ORDER BY cc.id ASC LIMIT 10`
+	if nameSort != ""{
+		switch nameSort{
+		case "markAsk":
+			querySort = ` ORDER BY b.name ASC LIMIT 10`
+		case "markDesc":
+			querySort = ` ORDER BY b.name DESC LIMIT 10`
+		case "modelAsk":
+			querySort = ` ORDER BY m.name ASC LIMIT 10`
+		case "modelDesc":
+			querySort = ` ORDER BY m.name DESC LIMIT 10`
+		case "yearAsk":
+			querySort = ` ORDER BY cc.year_issue ASC LIMIT 10`
+		case "yearDesc":
+			querySort = ` ORDER BY cc.year_issue DESC LIMIT 10`
+		default:
+			return nil,errors.New("400")
+		}
+	}
+	if year != ""{
+		querySort = `AND cc.year_issue = '` + year + `' ` + querySort
+	}
+	if idObj.IdModel != ""{
 		row, err = d.db.Query(ctx, `SELECT cc.id, cc.regnum, b.name, m.name, cc.year_issue, 
        CONCAT(h.surname, ' ', h.Name, ' ', h.patronymic) AS fullName FROM car_catalog cc
 	   JOIN brand b ON cc.brand = b.id 
 	   JOIN model m ON cc.model = m.id 
 	   JOIN holder h ON cc.holder = h.id 
-	   WHERE cc.delete_status = false AND cc.brand = $1 AND cc.Model = $2 AND cc.id > $3 ORDER BY cc.id ASC LIMIT 10`, brandId, modelId, page)
+	   WHERE cc.delete_status = false AND cc.brand = $1 AND cc.Model = $2 `+querySort, idObj.IdBrand, idObj.IdModel)
+	} else if idObj.IdBrand != ""{
+		row, err = d.db.Query(ctx, `SELECT cc.id, cc.regnum, b.name, m.name, cc.year_issue, 
+        CONCAT(h.surname, ' ', h.Name, ' ', h.patronymic) AS fullName FROM car_catalog cc
+		JOIN brand b ON cc.brand = b.id 
+		JOIN model m ON cc.model = m.id 
+		JOIN holder h ON cc.holder = h.id 
+		WHERE cc.delete_status = false AND cc.brand = $1 `+querySort, idObj.IdBrand)
+	} else {
+		row, err = d.db.Query(ctx, `SELECT cc.id, cc.regnum, b.name, m.name, cc.year_issue, 
+			CONCAT(h.surname, ' ', h.Name, ' ', h.patronymic) AS fullName FROM car_catalog cc
+			JOIN brand b ON cc.brand = b.id 
+			JOIN model m ON cc.model = m.id 
+			JOIN holder h ON cc.holder = h.id 
+			WHERE cc.delete_status = false ` + querySort)
 	}
 	if err != nil {
 		d.logger.Info(err)
 		return nil, err
 	}
 	var pc PageCatalog
-	pc.Catalog = make([]Catalog, 0, 20)
+	pc.Catalog = make([]Catalog, 0, 10)
 	pc.Catalog, err = pgx.CollectRows(row, pgx.RowToStructByPos[Catalog])
 	if err != nil {
 		d.logger.Info(err)
@@ -117,6 +120,74 @@ func (d *DB) IssuanceCatalogModel(ctx context.Context, page int, brandId, modelI
 		return nil, err
 	}
 }
+
+
+func (d *DB) IssuanceCatalogSortPage(ctx context.Context, idObj *IdObject , year, nameSort string, page int) (*PageCatalog, error) {
+	var row pgx.Rows
+	var err error
+	querySort := ` AND cc.id > $1 ORDER BY cc.id ASC LIMIT 10`
+	if nameSort != ""{
+		switch nameSort{
+		case "markAsk":
+			querySort = ` AND cc.id > $1 ORDER BY b.name ASC LIMIT 10`
+		case "markDesc":
+			querySort = ` AND cc.id < $1 ORDER BY b.name DESC LIMIT 10`
+		case "modelAsk":
+			querySort = ` AND cc.id > $1 ORDER BY m.name ASC LIMIT 10`
+		case "modelDesc":
+			querySort = ` AND cc.id < $1 ORDER BY m.name DESC LIMIT 10`
+		case "yearAsk":
+			querySort = ` AND cc.id > $1 ORDER BY cc.year_issue ASC LIMIT 10`
+		case "yearDesc":
+			querySort = ` AND cc.id < $1 ORDER BY cc.year_issue DESC LIMIT 10`
+		default:
+			return nil,errors.New("400")
+		}
+	}
+	if year != ""{
+		querySort = `AND cc.year_issue = '` + year + `' ` + querySort
+	}
+	if idObj.IdModel != ""{
+		row, err = d.db.Query(ctx, `SELECT cc.id, cc.regnum, b.name, m.name, cc.year_issue, 
+       CONCAT(h.surname, ' ', h.Name, ' ', h.patronymic) AS fullName FROM car_catalog cc
+	   JOIN brand b ON cc.brand = b.id 
+	   JOIN model m ON cc.model = m.id 
+	   JOIN holder h ON cc.holder = h.id 
+	   WHERE cc.delete_status = false AND cc.brand = $2 AND cc.Model = $3 ` + querySort, page, idObj.IdBrand, idObj.IdModel)
+	} else if idObj.IdBrand != ""{
+		row, err = d.db.Query(ctx, `SELECT cc.id, cc.regnum, b.name, m.name, cc.year_issue, 
+        CONCAT(h.surname, ' ', h.Name, ' ', h.patronymic) AS fullName FROM car_catalog cc
+		JOIN brand b ON cc.brand = b.id 
+		JOIN model m ON cc.model = m.id 
+		JOIN holder h ON cc.holder = h.id 
+		WHERE cc.delete_status = false AND cc.brand = $2  ` + querySort, page, idObj.IdBrand)
+	} else {
+		row, err = d.db.Query(ctx, `SELECT cc.id, cc.regnum, b.name, m.name, cc.year_issue, 
+			CONCAT(h.surname, ' ', h.Name, ' ', h.patronymic) AS fullName FROM car_catalog cc
+			JOIN brand b ON cc.brand = b.id 
+			JOIN model m ON cc.model = m.id 
+			JOIN holder h ON cc.holder = h.id 
+			WHERE cc.delete_status = false ` + querySort, page)
+	}
+	if err != nil {
+		d.logger.Info(err)
+		return nil, err
+	}
+	var pc PageCatalog
+	pc.Catalog = make([]Catalog, 0, 10)
+	pc.Catalog, err = pgx.CollectRows(row, pgx.RowToStructByPos[Catalog])
+	if err != nil {
+		d.logger.Info(err)
+		return nil, err
+	}
+	if len(pc.Catalog) != 0 {
+		pc.LastInd = pc.Catalog[len(pc.Catalog)-1].Id
+		return &pc, err
+	} else {
+		return nil, err
+	}
+}
+
 
 func (d *DB) DeleteItemsCatalog(ctx context.Context, idItems string) error {
 	_, err := d.db.Exec(ctx, `UPDATE car_catalog SET delete_status = true WHERE id = $1`, idItems)

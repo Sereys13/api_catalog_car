@@ -26,19 +26,18 @@ func (a *Api) PageCatalogGet(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	var filtrYear string
-	if _, ok := params["year"]; ok {
-		filtrYear = params["year"][0]
-	}
 	vars := mux.Vars(r)
-	_, okBrand := vars["brand"]
-	_, okModel := vars["model"]
-	if okModel {
-		catalog, err = a.db.IssuanceCatalogModel(a.ctx, p, vars["brand"], vars["model"], filtrYear)
-	} else if okBrand {
-		catalog, err = a.db.IssuanceCatalogBrand(a.ctx, p, vars["brand"], filtrYear)
+	idObj := database.IdObject{IdBrand: vars["brand"], IdModel: vars["model"]}
+	_, okFilter := params["year"]
+	_, okSort := params["sort"]
+	if okFilter && okSort {
+		catalog, err = a.db.IssuanceCatalogSort(a.ctx,&idObj,params["year"][0],params["sort"][0],p)
+	} else if okFilter {
+		catalog, err = a.db.IssuanceCatalogSort(a.ctx,&idObj,params["year"][0],"",p)
+	} else if okSort {
+		catalog, err = a.db.IssuanceCatalogSort(a.ctx,&idObj,"",params["sort"][0],p)
 	} else {
-		catalog, err = a.db.IssuanceCatalog(a.ctx, p, filtrYear)
+		catalog, err = a.db.IssuanceCatalog(a.ctx, &idObj, p)
 	}
 	if err != nil {
 		a.logger.Info(err)
