@@ -2,192 +2,99 @@ package database
 
 import (
 	"context"
-	"errors"
+	"database/sql"
 	"strconv"
+	"strings"
+	"unicode"
 
 	"github.com/jackc/pgx/v5"
 )
 
-func (d *DB) IssuanceCatalog(ctx context.Context, idObj *IdObject , page int) (*PageCatalog, error) {
-	var row pgx.Rows
-	var err error
-	if idObj.IdModel != ""{
-		row, err = d.db.Query(ctx, `SELECT cc.id, cc.regnum, b.name, m.name, cc.year_issue, 
-       CONCAT(h.surname, ' ', h.Name, ' ', h.patronymic) AS fullName FROM car_catalog cc
-	   JOIN brand b ON cc.brand = b.id 
-	   JOIN model m ON cc.model = m.id 
-	   JOIN holder h ON cc.holder = h.id 
-	   WHERE cc.delete_status = false AND cc.brand = $1 AND cc.Model = $2 AND cc.id > $3 ORDER BY cc.id ASC LIMIT 10`, idObj.IdBrand, idObj.IdModel, page)
-	} else if idObj.IdBrand != ""{
-		row, err = d.db.Query(ctx, `SELECT cc.id, cc.regnum, b.name, m.name, cc.year_issue, 
-        CONCAT(h.surname, ' ', h.Name, ' ', h.patronymic) AS fullName FROM car_catalog cc
-		JOIN brand b ON cc.brand = b.id 
-		JOIN model m ON cc.model = m.id 
-		JOIN holder h ON cc.holder = h.id 
-		WHERE cc.delete_status = false AND cc.brand = $1 AND cc.id > $2 ORDER BY cc.id ASC LIMIT 10`, idObj.IdBrand, page)
-	} else {
-		row, err = d.db.Query(ctx, `SELECT cc.id, cc.regnum, b.name, m.name, cc.year_issue, 
+func (d *DB) IssuanceCatalog(ctx context.Context, page, limit int) (pc PageCatalog, err error) {
+	conn, err := d.db.Acquire(ctx)
+	if err != nil {
+		d.logger.Error(err)
+		return 
+	}
+
+	defer conn.Release()
+	row, err := conn.Query(ctx, `SELECT cc.id, cc.regnum, b.name, m.name, cc.year_issue, 
 			CONCAT(h.surname, ' ', h.Name, ' ', h.patronymic) AS fullName FROM car_catalog cc
 			JOIN brand b ON cc.brand = b.id 
 			JOIN model m ON cc.model = m.id 
 			JOIN holder h ON cc.holder = h.id 
-			WHERE cc.delete_status = false AND cc.id > $1 ORDER BY cc.id ASC LIMIT 10`, page)
-	}
+			WHERE cc.delete_status = false AND cc.id > $1 ORDER BY cc.id ASC LIMIT $2`, page, limit)
 	if err != nil {
 		d.logger.Info(err)
-		return nil, err
+		return
 	}
-	var pc PageCatalog
-	pc.Catalog = make([]Catalog, 0, 10)
+
+	defer row.Close()
+	pc.Catalog = make([]Catalog, 0, limit)
 	pc.Catalog, err = pgx.CollectRows(row, pgx.RowToStructByPos[Catalog])
 	if err != nil {
 		d.logger.Info(err)
-		return nil, err
+		return
 	}
+
 	if len(pc.Catalog) != 0 {
 		pc.LastInd = pc.Catalog[len(pc.Catalog)-1].Id
-		return &pc, err
+		return pc, err
 	} else {
-		return nil, err
+		return 
 	}
 }
 
-func (d *DB) IssuanceCatalogSort(ctx context.Context, idObj *IdObject , year, nameSort string, page int) (*PageCatalog, error) {
-	if page != 0 {
-		return d.IssuanceCatalogSortPage(ctx, idObj, year, nameSort, page)
+func (d *DB) IssuanceCatalogWithFiltr(ctx context.Context, fq *FiltrsQuery) (pc PageCatalog, err error) {
+	conn, err := d.db.Acquire(ctx)
+	if err != nil {
+		d.logger.Error(err)
+		return 
 	}
-	var row pgx.Rows
-	var err error
-	querySort := ` ORDER BY cc.id ASC LIMIT 10`
-	if nameSort != ""{
-		switch nameSort{
-		case "markAsk":
-			querySort = ` ORDER BY b.name ASC LIMIT 10`
-		case "markDesc":
-			querySort = ` ORDER BY b.name DESC LIMIT 10`
-		case "modelAsk":
-			querySort = ` ORDER BY m.name ASC LIMIT 10`
-		case "modelDesc":
-			querySort = ` ORDER BY m.name DESC LIMIT 10`
-		case "yearAsk":
-			querySort = ` ORDER BY cc.year_issue ASC LIMIT 10`
-		case "yearDesc":
-			querySort = ` ORDER BY cc.year_issue DESC LIMIT 10`
-		default:
-			return nil,errors.New("400")
-		}
+
+	defer conn.Release()
+
+	var queryBrand, queryModel, queryHolder string
+	if len(fq.Brands) != 0 {
+		queryBrand = " AND (b.id = " + strings.Join(fq.Brands, " OR b.id = ") + ")"
 	}
-	if year != ""{
-		querySort = `AND cc.year_issue = '` + year + `' ` + querySort
+
+	if len(fq.Models) != 0 {
+		queryModel = " AND (m.id = " + strings.Join(fq.Models, " OR m.id = ") + ")"
 	}
-	if idObj.IdModel != ""{
-		row, err = d.db.Query(ctx, `SELECT cc.id, cc.regnum, b.name, m.name, cc.year_issue, 
-       CONCAT(h.surname, ' ', h.Name, ' ', h.patronymic) AS fullName FROM car_catalog cc
-	   JOIN brand b ON cc.brand = b.id 
-	   JOIN model m ON cc.model = m.id 
-	   JOIN holder h ON cc.holder = h.id 
-	   WHERE cc.delete_status = false AND cc.brand = $1 AND cc.Model = $2 `+querySort, idObj.IdBrand, idObj.IdModel)
-	} else if idObj.IdBrand != ""{
-		row, err = d.db.Query(ctx, `SELECT cc.id, cc.regnum, b.name, m.name, cc.year_issue, 
-        CONCAT(h.surname, ' ', h.Name, ' ', h.patronymic) AS fullName FROM car_catalog cc
-		JOIN brand b ON cc.brand = b.id 
-		JOIN model m ON cc.model = m.id 
-		JOIN holder h ON cc.holder = h.id 
-		WHERE cc.delete_status = false AND cc.brand = $1 `+querySort, idObj.IdBrand)
-	} else {
-		row, err = d.db.Query(ctx, `SELECT cc.id, cc.regnum, b.name, m.name, cc.year_issue, 
+
+	if len(fq.Holders) != 0 {
+		queryHolder = " AND (cc.holder = " + strings.Join(fq.Holders, " OR cc.holder = ") + ")"
+	}
+
+	sort := "AND cc.id > $1 ORDER BY cc.id ASC LIMIT $2"
+	row, err := conn.Query(ctx, `SELECT cc.id, cc.regnum, b.name, m.name, cc.year_issue, 
 			CONCAT(h.surname, ' ', h.Name, ' ', h.patronymic) AS fullName FROM car_catalog cc
 			JOIN brand b ON cc.brand = b.id 
 			JOIN model m ON cc.model = m.id 
 			JOIN holder h ON cc.holder = h.id 
-			WHERE cc.delete_status = false ` + querySort)
-	}
+			WHERE cc.delete_status = false` + queryBrand + queryModel + queryHolder + sort, 
+			fq.Page, fq.Limit)
 	if err != nil {
 		d.logger.Info(err)
-		return nil, err
+		return
 	}
-	var pc PageCatalog
-	pc.Catalog = make([]Catalog, 0, 10)
+
+	defer row.Close()
+	pc.Catalog = make([]Catalog, 0, fq.Limit)
 	pc.Catalog, err = pgx.CollectRows(row, pgx.RowToStructByPos[Catalog])
 	if err != nil {
 		d.logger.Info(err)
-		return nil, err
+		return
 	}
+
 	if len(pc.Catalog) != 0 {
 		pc.LastInd = pc.Catalog[len(pc.Catalog)-1].Id
-		return &pc, err
+		return pc, err
 	} else {
-		return nil, err
+		return 
 	}
 }
-
-
-func (d *DB) IssuanceCatalogSortPage(ctx context.Context, idObj *IdObject , year, nameSort string, page int) (*PageCatalog, error) {
-	var row pgx.Rows
-	var err error
-	querySort := ` AND cc.id > $1 ORDER BY cc.id ASC LIMIT 10`
-	if nameSort != ""{
-		switch nameSort{
-		case "markAsk":
-			querySort = ` AND cc.id > $1 ORDER BY b.name ASC LIMIT 10`
-		case "markDesc":
-			querySort = ` AND cc.id < $1 ORDER BY b.name DESC LIMIT 10`
-		case "modelAsk":
-			querySort = ` AND cc.id > $1 ORDER BY m.name ASC LIMIT 10`
-		case "modelDesc":
-			querySort = ` AND cc.id < $1 ORDER BY m.name DESC LIMIT 10`
-		case "yearAsk":
-			querySort = ` AND cc.id > $1 ORDER BY cc.year_issue ASC LIMIT 10`
-		case "yearDesc":
-			querySort = ` AND cc.id < $1 ORDER BY cc.year_issue DESC LIMIT 10`
-		default:
-			return nil,errors.New("400")
-		}
-	}
-	if year != ""{
-		querySort = `AND cc.year_issue = '` + year + `' ` + querySort
-	}
-	if idObj.IdModel != ""{
-		row, err = d.db.Query(ctx, `SELECT cc.id, cc.regnum, b.name, m.name, cc.year_issue, 
-       CONCAT(h.surname, ' ', h.Name, ' ', h.patronymic) AS fullName FROM car_catalog cc
-	   JOIN brand b ON cc.brand = b.id 
-	   JOIN model m ON cc.model = m.id 
-	   JOIN holder h ON cc.holder = h.id 
-	   WHERE cc.delete_status = false AND cc.brand = $2 AND cc.Model = $3 ` + querySort, page, idObj.IdBrand, idObj.IdModel)
-	} else if idObj.IdBrand != ""{
-		row, err = d.db.Query(ctx, `SELECT cc.id, cc.regnum, b.name, m.name, cc.year_issue, 
-        CONCAT(h.surname, ' ', h.Name, ' ', h.patronymic) AS fullName FROM car_catalog cc
-		JOIN brand b ON cc.brand = b.id 
-		JOIN model m ON cc.model = m.id 
-		JOIN holder h ON cc.holder = h.id 
-		WHERE cc.delete_status = false AND cc.brand = $2  ` + querySort, page, idObj.IdBrand)
-	} else {
-		row, err = d.db.Query(ctx, `SELECT cc.id, cc.regnum, b.name, m.name, cc.year_issue, 
-			CONCAT(h.surname, ' ', h.Name, ' ', h.patronymic) AS fullName FROM car_catalog cc
-			JOIN brand b ON cc.brand = b.id 
-			JOIN model m ON cc.model = m.id 
-			JOIN holder h ON cc.holder = h.id 
-			WHERE cc.delete_status = false ` + querySort, page)
-	}
-	if err != nil {
-		d.logger.Info(err)
-		return nil, err
-	}
-	var pc PageCatalog
-	pc.Catalog = make([]Catalog, 0, 10)
-	pc.Catalog, err = pgx.CollectRows(row, pgx.RowToStructByPos[Catalog])
-	if err != nil {
-		d.logger.Info(err)
-		return nil, err
-	}
-	if len(pc.Catalog) != 0 {
-		pc.LastInd = pc.Catalog[len(pc.Catalog)-1].Id
-		return &pc, err
-	} else {
-		return nil, err
-	}
-}
-
 
 func (d *DB) DeleteItemsCatalog(ctx context.Context, idItems string) error {
 	_, err := d.db.Exec(ctx, `UPDATE car_catalog SET delete_status = true WHERE id = $1`, idItems)
@@ -198,164 +105,236 @@ func (d *DB) DeleteItemsCatalog(ctx context.Context, idItems string) error {
 	return err
 }
 
-func (d *DB) UpdateItemsRegNum(ctx context.Context, idItems string, urm *UpdateRegNum) error {
-	_, err := d.db.Exec(ctx, `UPDATE car_catalog SET regnum = $1 WHERE id = $2`, urm.RegNum, idItems)
+func (d *DB) UpdateItems(ctx context.Context, idItems string, newData *UpdateCatalog) (err error){
+	conn, err := d.db.Acquire(ctx)
 	if err != nil {
-		d.logger.Info(err)
-		return err
+		d.logger.Error(err)
+		return
 	}
-	return err
-}
 
-func (d *DB) UpdateItemsBrand(ctx context.Context, idItems string, ubm *UpdateBrandModel) error {
-	var idModel, idBrand int
-	err := d.db.QueryRow(ctx, `SELECT id FROM brand WHERE name = $1`, ubm.Brand).Scan(&idBrand)
-	if err != nil && err != pgx.ErrNoRows {
-		d.logger.Info(err)
-		return err
-	}
-	if idBrand == 0 {
-		err = d.db.QueryRow(ctx, `INSERT INTO brand (name) VALUES ($1) returning id`, ubm.Brand).Scan(&idBrand)
+	var qu QueryUpdate
+	var nullId sql.NullInt64
+	var quers []string
+	if newData.Brand != ""{
+		err = conn.QueryRow(ctx, `SELECT id FROM brand WHERE LOWER(name) = LOWER($1)`, newData.Brand).Scan(&nullId)
+		if nullId.Valid{
+			qu.Brand = int(nullId.Int64)
+			nullId.Valid = false
+		} else {
+			err = conn.QueryRow(ctx, `INSERT INTO brand (name) VALUES ($1) RETURNING id`, capitalizeFirstLetter(newData.Brand)).Scan(&qu.Brand)
+		}
+
 		if err != nil {
-			d.logger.Info(err)
-			return err
+			d.logger.Error(err)
+			return
 		}
-		err = d.db.QueryRow(ctx, `INSERT INTO model (name, brand) VALUES ($1, $2) returning id`, ubm.Model, idBrand).Scan(&idModel)
+		quers = append(quers, "brand = " + strconv.Itoa(qu.Brand))
+	}
+
+	if newData.Model != ""{
+		err = conn.QueryRow(ctx, `SELECT id FROM model WHERE LOWER(name) = LOWER($1) AND brand = $2`, newData.Model, qu.Brand).Scan(&nullId)
+		if nullId.Valid{
+			qu.Model = int(nullId.Int64)
+			nullId.Valid = false
+		} else {
+			err = conn.QueryRow(ctx, `INSERT INTO model (name, brand) VALUES ($1, $2) RETURNING id`, newData.Model, qu.Brand).Scan(&qu.Model)
+		}
+
 		if err != nil {
-			d.logger.Info(err)
-			return err
+			d.logger.Error(err)
+			return
 		}
-	} else {
-		err = d.db.QueryRow(ctx, `SELECT id FROM model WHERE name = $1 AND brand = $2`, ubm.Model, idBrand).Scan(&idModel)
-		if err != nil && err != pgx.ErrNoRows {
-			d.logger.Info(err)
-			return err
-		}
-	}
-	if idModel == 0 {
-		err = d.db.QueryRow(ctx, `INSERT INTO model (name, brand) VALUES ($1, $2) returning id`, ubm.Model, idBrand).Scan(&idModel)
-		if err != nil && err != pgx.ErrNoRows {
-			d.logger.Info(err)
-			return err
-		}
+		quers = append(quers, "model = " + strconv.Itoa(qu.Model))
 	}
 
-	_, err = d.db.Exec(ctx, `UPDATE car_catalog SET model = $1, brand = $2 WHERE id = $3`, idModel, idBrand, idItems)
-	if err != nil {
-		d.logger.Info(err)
-		return err
-	}
-	return err
-}
+	if newData.Name != ""{
+		var nullString sql.NullString
+		if newData.Patronymic != ""{
+			nullString.Valid = true
+			nullString.String = newData.Patronymic
+		}
 
-func (d *DB) UpdateItemsYear(ctx context.Context, idItems string, uy *UpdateYear) error {
-	_, err := d.db.Exec(ctx, `UPDATE car_catalog SET year_issue = $1 WHERE id = $2`, uy.Year, idItems)
-	if err != nil {
-		d.logger.Info(err)
-		return err
-	}
-	return err
-}
+		if newData.Patronymic == ""{
+			err = conn.QueryRow(ctx, `SELECT id FROM holder WHERE LOWER(name) = LOWER($1)
+							AND LOWER(surname) = LOWER($2) AND patronymic IS NULL`, newData.Name, newData.Surname).Scan(&nullId)
+		} else {
+			err = conn.QueryRow(ctx, `SELECT id FROM holder WHERE LOWER(name) = LOWER($1)
+							AND LOWER(surname) = LOWER($2) AND LOWER(patronymic) = LOWER($3)`, newData.Name, newData.Surname, nullString).Scan(&nullId)
+		}
+		if nullId.Valid{
+			qu.Holder = int(nullId.Int64)
+			nullId.Valid = false
+		} else {
+			err = conn.QueryRow(ctx, `INSERT INTO holder (name, surname, patronymic) VALUES ($1, $2, $3) RETURNING id`, newData.Name, newData.Surname, nullString).Scan(&qu.Holder)
+		}
 
-func (d *DB) UpdateItemsHolder(ctx context.Context, idItems string, uh *UpdateHolder) error {
-	var idHolder int
-	err := d.db.QueryRow(ctx, `SELECT holder FROM car_catalog WHERE id = $1`, idItems).Scan(&idHolder)
-	if err != nil {
-		d.logger.Info(err)
-		return err
+		if err != nil {
+			d.logger.Error(err)
+			return
+		}
+
+		quers = append(quers, "holder = " + strconv.Itoa(qu.Holder))
 	}
-	_, err = d.db.Exec(ctx, `UPDATE holder SET name = $1, surname = $2, patronymic = $3 WHERE id = $4`, uh.Name, uh.Surname, uh.Patronymic, idHolder)
-	if err != nil {
-		d.logger.Info(err)
-		return err
+
+	if newData.RegNum != ""{
+		quers = append(quers, "regnum = '" + newData.RegNum + "'")
 	}
-	return err
+
+	if newData.Year != ""{
+		quers = append(quers, "year_issue = '" + newData.Year + "'")
+	}
+
+	query := "UPDATE car_catalog SET " + strings.Join(quers, ",") +" WHERE id = $1"
+	_, err = conn.Exec(ctx, query, idItems)
+	if err != nil {
+		d.logger.Error(err)
+		return
+	}
+	return
 }
 
 func (d *DB) AddItemsHolder(ctx context.Context, items *ItemsCatalog) error {
-	var idBrand, idModel int
-	err := d.db.QueryRow(ctx, `SELECT id FROM brand WHERE name = $1`, items.Brand).Scan(&idBrand)
-	if err != nil && err != pgx.ErrNoRows {
-		d.logger.Info(err)
+	conn, err := d.db.Acquire(ctx)
+	if err != nil {
+		d.logger.Error(err)
 		return err
 	}
-	if idBrand == 0 {
-		err = d.db.QueryRow(ctx, `INSERT INTO brand (name) VALUES ($1) returning id`, items.Brand).Scan(&idBrand)
-		if err != nil && err != pgx.ErrNoRows {
-			d.logger.Info(err)
+
+	defer conn.Release()
+	var idBrand, idModel sql.NullInt64
+	err = conn.QueryRow(ctx, `SELECT id FROM brand WHERE LOWER(name) = LOWER($1)`, items.Brand).Scan(&idBrand)
+	if !idBrand.Valid{
+		err = conn.QueryRow(ctx, `INSERT INTO brand (name) VALUES ($1) returning id`, capitalizeFirstLetter(items.Brand)).Scan(&idBrand)
+		if err != nil{
+			d.logger.Error(err)
 			return err
 		}
-		err = d.db.QueryRow(ctx, `INSERT INTO model (name, brand) VALUES ($1, $2) returning id`, items.Model, idBrand).Scan(&idModel)
-		if err != nil {
-			d.logger.Info(err)
+
+		err = conn.QueryRow(ctx, `INSERT INTO model (name, brand) VALUES ($1, $2) returning id`, items.Model, idBrand.Int64).Scan(&idModel)
+		if err != nil{
+			d.logger.Error(err)
 			return err
 		}
+
 	} else {
-		err = d.db.QueryRow(ctx, `SELECT id FROM model WHERE name = $1 AND brand = $2`, items.Model, idBrand).Scan(&idModel)
-		if err != nil && err != pgx.ErrNoRows {
-			d.logger.Info(err)
+		if err != nil{
+			d.logger.Error(err)
+			return err
+		}
+
+		err = conn.QueryRow(ctx, `SELECT id FROM model WHERE LOWER(name) = LOWER($1) AND brand = $2`, items.Model, idBrand.Int64).Scan(&idModel)
+		if !idModel.Valid{
+			err = conn.QueryRow(ctx, `INSERT INTO model (name, brand) VALUES ($1, $2) returning id`, items.Model, idBrand.Int64).Scan(&idModel)
+		}
+
+		if err != nil {
+			d.logger.Error(err)
 			return err
 		}
 	}
-	if idModel == 0 {
-		err = d.db.QueryRow(ctx, `INSERT INTO model (name, brand) VALUES ($1, $2) returning id`, items.Model, idBrand).Scan(&idModel)
-		if err != nil {
-			d.logger.Info(err)
-			return err
-		}
+
+	var idHolder sql.NullInt64
+	var sqlPatronymic sql.NullString
+	var idCarCatalog sql.NullInt64
+	if items.Owner.Patronymic != ""{
+		err = conn.QueryRow(ctx, `SELECT id FROM holder WHERE LOWER(name) = LOWER($1) AND LOWER(surname) = LOWER($2) AND LOWER(patronymic) = LOWER($3)`, items.Owner.Name, items.Owner.Surname, items.Owner.Patronymic).Scan(&idHolder)
+		sqlPatronymic.Valid = true
+		sqlPatronymic.String = items.Owner.Patronymic
+	} else {
+		err = conn.QueryRow(ctx, `SELECT id FROM holder WHERE LOWER(name) = LOWER($1) AND LOWER(surname) = LOWER($2) AND patronymic IS NULL`, items.Owner.Name, items.Owner.Surname).Scan(&idHolder)
+	} 
+
+	if !idHolder.Valid{
+		err = conn.QueryRow(ctx, `INSERT INTO holder (name, surname, patronymic) VALUES ($1, $2, $3) returning id`, capitalizeFirstLetter(items.Owner.Name), capitalizeFirstLetter(items.Owner.Surname), sqlPatronymic).Scan(&idHolder)
 	}
-	var idHolder int
-	err = d.db.QueryRow(ctx, `SELECT id FROM car_catalog WHERE brand = $1 AND model = $2 AND regnum = $3`, idBrand, idModel, items.RegNum).Scan(&idHolder)
-	if err == pgx.ErrNoRows {
-		err = d.db.QueryRow(ctx, `INSERT INTO holder (name, surname, patronymic) VALUES ($1, $2,$3) returning id`, items.Owner.Name, items.Owner.Surname, items.Owner.Patronymic).Scan(&idHolder)
-		if err != nil {
-			d.logger.Info(err)
-			return err
-		}
-		year := ""
-		if items.Year == 0 {
-			year = "N/A"
-		} else {
-			year = strconv.Itoa(items.Year)
-		}
-		_, err = d.db.Exec(ctx, `INSERT INTO car_catalog (regnum,brand,model,year_issue,holder) VALUES ($1,$2,$3,$4,$5)`,
-			items.RegNum, idBrand, idModel, year, idHolder)
-		if err != nil {
-			d.logger.Info(err)
-			return err
-		}
-	} else if err == nil {
-		return errors.New("this line already exists")
+
+	if err != nil {
+		d.logger.Error(err)
+		return err
 	}
+
+	var year string
+	if items.Year == 0 {
+		year = "N/A"
+	} else {
+		year = strconv.Itoa(items.Year)
+	}
+
+	err = conn.QueryRow(ctx, `SELECT id FROM car_catalog WHERE regnum = $1 AND brand = $2 AND model = $3 AND year_issue = $4 AND holder = $5`, items.RegNum, idBrand.Int64, idModel.Int64, year, idHolder.Int64).Scan(&idCarCatalog)
+	if !idCarCatalog.Valid{
+		_, err = conn.Exec(ctx, `INSERT INTO car_catalog (regnum, brand, model, year_issue, holder) VALUES ($1, $2, $3, $4, $5)`, items.RegNum, idBrand.Int64, idModel.Int64, year, idHolder.Int64)
+	} else {
+		if err != nil {
+			d.logger.Error(err)
+			return err
+		}
+		_, err = conn.Exec(ctx, `UPDATE car_catalog SET delete_status = false WHERE id = $1`, idCarCatalog.Int64)
+	}
+
+	if err != nil {
+		d.logger.Error(err)
+		return err
+	}
+
 	return err
 }
 
-func (d *DB) IssuanceBrand(ctx context.Context) ([]Brand, error) {
-	row, err := d.db.Query(ctx, `SELECT id, name FROM brand`)
+func (d *DB) IssuanceFilters(ctx context.Context) (f Filters, err error){
+	conn, err := d.db.Acquire(ctx)
+	if err != nil {
+		d.logger.Error(err)
+		return
+	}
+
+	defer conn.Release()
+	f.Brands = make(map[string]*ModelFilters, 20)
+	row, err := conn.Query(ctx, `SELECT m.brand, b.name, m.id, m.name FROM model m
+								JOIN brand b ON m.brand = b.id`)
+	if err != nil {
+		d.logger.Error(err)
+		return
+	}
+	defer row.Close()
+	
+	var idBrand, idModel int
+	var nameBrand, nameModel string
+	var ok bool
+
+	for row.Next(){
+		err = row.Scan(&idBrand, &nameBrand, &idModel, &nameModel)
+		if err != nil {
+			d.logger.Error(err)
+			return
+		}
+
+		if _, ok = f.Brands[nameBrand]; ok {
+			f.Brands[nameBrand].Models = append(f.Brands[nameBrand].Models, Model{Id: idModel, Name: nameModel})
+		} else {
+			f.Brands[nameBrand] = &ModelFilters{IdBrand: idBrand, Models: make([]Model, 0, 7)}
+			f.Brands[nameBrand].Models = append(f.Brands[nameBrand].Models, Model{Id: idModel, Name: nameModel})
+		}
+	}
+
+	row, err = conn.Query(ctx, `SELECT id, CONCAT(surname, ' ', Name, ' ', patronymic) FROM holder`)
+	if err != nil {
+		d.logger.Error(err)
+		return
+	}
+
+	f.Holders, err = pgx.CollectRows(row, pgx.RowToStructByPos[Holder])
 	if err != nil {
 		d.logger.Info(err)
-		return nil, err
+		return
 	}
-	var sliceBrand []Brand
-	sliceBrand, err = pgx.CollectRows(row, pgx.RowToStructByPos[Brand])
-	if err != nil {
-		d.logger.Info(err)
-		return nil, err
-	}
-	return sliceBrand, err
+
+	return
 }
 
-func (d *DB) IssuanceModel(ctx context.Context, idBrand string) ([]Model, error) {
-	row, err := d.db.Query(ctx, `SELECT id, name FROM model WHERE brand = $1`, idBrand)
-	if err != nil {
-		d.logger.Info(err)
-		return nil, err
-	}
-	var sliceModel []Model
-	sliceModel, err = pgx.CollectRows(row, pgx.RowToStructByPos[Model])
-	if err != nil {
-		d.logger.Info(err)
-		return nil, err
-	}
-	return sliceModel, err
+func capitalizeFirstLetter(s string) string {
+    r := []rune(s)
+    r[0] = unicode.ToUpper(r[0])
+    for i := 1; i < len(r); i++ {
+        r[i] = unicode.ToLower(r[i])
+    }
+    return string(r)
 }

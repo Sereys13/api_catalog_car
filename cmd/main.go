@@ -53,7 +53,7 @@ func main() {
 	if err != nil {
 		logger.Fatal("Failed connection database error = ", err)
 	}
-	defer db.Close(ctx)
+	defer db.Close()
 
 	a := api.NewApi(ctx, db, logger, cfg.UrlApiCarInfo)
 

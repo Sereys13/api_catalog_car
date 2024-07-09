@@ -4,10 +4,13 @@ import (
 	"api_catalog_car/internal/database"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"regexp"
 	"strconv"
+	"time"
+	"unicode"
 
 	"github.com/gorilla/mux"
 )
@@ -15,35 +18,80 @@ import (
 func (a *Api) PageCatalogGet(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	params := r.URL.Query()
-	var catalog *database.PageCatalog
 	var err error
 	p := 0
+	limit := 10
 	if _, ok := params["p"]; ok {
 		p, err = strconv.Atoi(params["p"][0])
 		if err != nil {
-			a.logger.Info(err)
+			a.logger.Error(err)
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
 	}
-	vars := mux.Vars(r)
-	idObj := database.IdObject{IdBrand: vars["brand"], IdModel: vars["model"]}
-	_, okFilter := params["year"]
-	_, okSort := params["sort"]
-	if okFilter && okSort {
-		catalog, err = a.db.IssuanceCatalogSort(a.ctx,&idObj,params["year"][0],params["sort"][0],p)
-	} else if okFilter {
-		catalog, err = a.db.IssuanceCatalogSort(a.ctx,&idObj,params["year"][0],"",p)
-	} else if okSort {
-		catalog, err = a.db.IssuanceCatalogSort(a.ctx,&idObj,"",params["sort"][0],p)
-	} else {
-		catalog, err = a.db.IssuanceCatalog(a.ctx, &idObj, p)
+
+	if _, ok := params["count"]; ok {
+		limit, err = strconv.Atoi(params["count"][0])
+		if err != nil {
+			a.logger.Error(err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
 	}
+
+	var catalog database.PageCatalog
+	if _, ok := params["filtr"]; ok {
+		fq := database.FiltrsQuery{Page: p, Limit: limit}
+		if brands, ok := params["brand"]; ok {
+			for _, el := range brands{
+				_, err = strconv.Atoi(el)
+				if err != nil {
+					a.logger.Error(err)
+					w.WriteHeader(http.StatusBadRequest)
+					fmt.Fprintf(w, "Error: %s", "Некорретный параметр запроса brand")
+					return
+				}
+			}
+			fq.Brands = brands
+		}
+
+		if models, ok := params["model"]; ok {
+			for _, el := range models{
+				_, err = strconv.Atoi(el)
+				if err != nil {
+					a.logger.Error(err)
+					w.WriteHeader(http.StatusBadRequest)
+					fmt.Fprintf(w, "Error: %s", "Некорретный параметр запроса model")
+					return
+				}
+			}
+			fq.Models = models
+		}
+
+		if holders, ok := params["holder"]; ok {
+			for _, el := range holders{
+				_, err = strconv.Atoi(el)
+				if err != nil {
+					a.logger.Error(err)
+					w.WriteHeader(http.StatusBadRequest)
+					fmt.Fprintf(w, "Error: %s", "Некорретный параметр запроса holder")
+					return
+				}
+			}
+			fq.Holders = holders
+		}
+
+		catalog, err = a.db.IssuanceCatalogWithFiltr(a.ctx, &fq)
+	} else {
+		catalog, err = a.db.IssuanceCatalog(a.ctx, p, limit)
+	}
+
 	if err != nil {
-		a.logger.Info(err)
+		a.logger.Error(err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
+
 	catalogJson, err := json.Marshal(catalog)
 	if err != nil {
 		a.logger.Info(err)
@@ -51,7 +99,6 @@ func (a *Api) PageCatalogGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Write(catalogJson)
-
 }
 
 func (a *Api) PageCatalogDelete(w http.ResponseWriter, r *http.Request) {
@@ -66,7 +113,7 @@ func (a *Api) PageCatalogDelete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func (a *Api) PutCatalogRegNum(w http.ResponseWriter, r *http.Request) {
+func (a *Api) PutCatalog(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -74,97 +121,52 @@ func (a *Api) PutCatalogRegNum(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	var urn database.UpdateRegNum
-	err = json.Unmarshal(body, &urn)
+
+	var data database.UpdateCatalog
+	err = json.Unmarshal(body, &data)
 	if err != nil {
-		a.logger.Info(err)
+		a.logger.Error(err)
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
+	
+	if (data.Model != "" && data.Brand == "") {
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprintf(w, "Error: %s", "Для смены модели необходимо заполнить поле brand")
+		return
+	} else if (data.Name == "" && data.Surname !="")  || (data.Name != "" && data.Surname =="")  || (data.Patronymic != "" && (data.Surname == "" || data.Name == "")){
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprintf(w, "Error: %s", "Для смены владельца поля имя и фамилия должны быть заполнены")
+		return
+	} else if data.Year != "" && !checkYear(data.Year){
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprintf(w, "Error: %s", "Год выпуска не корректен")
+		return
+	} else if data.RegNum != ""{
+		reg, err := regexp.Compile("[A-Z][0-9]{3}[A-Z]{2}[0-9]{2}[0-9]?$")
+		if err != nil {
+			a.logger.Error(err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		if !reg.MatchString(data.RegNum){
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprintf(w, "Error: %s", "Некоректный номер для смены")
+			return
+		}
+	}
+
 	vars := mux.Vars(r)
-	err = a.db.UpdateItemsRegNum(a.ctx, vars["id"], &urn)
+	err = a.db.UpdateItems(a.ctx, vars["id"], &data)
 	if err != nil {
-		a.logger.Info(err)
+		a.logger.Error(err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
 }
 
-func (a *Api) PutCatalogBrandModel(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		a.logger.Info(err)
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-	var ubm database.UpdateBrandModel
-	err = json.Unmarshal(body, &ubm)
-	if err != nil {
-		a.logger.Info(err)
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-	vars := mux.Vars(r)
-	err = a.db.UpdateItemsBrand(a.ctx, vars["id"], &ubm)
-	if err != nil {
-		a.logger.Info(err)
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-	w.WriteHeader(http.StatusOK)
-}
 
-func (a *Api) PutCatalogYear(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		a.logger.Info(err)
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-	var uy database.UpdateYear
-	err = json.Unmarshal(body, &uy)
-	if err != nil {
-		a.logger.Info(err)
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-	vars := mux.Vars(r)
-	err = a.db.UpdateItemsYear(a.ctx, vars["id"], &uy)
-	if err != nil {
-		a.logger.Info(err)
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-	w.WriteHeader(http.StatusOK)
-}
-
-func (a *Api) PutCatalogHolder(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		a.logger.Info(err)
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-	var uh database.UpdateHolder
-	err = json.Unmarshal(body, &uh)
-	if err != nil {
-		a.logger.Info(err)
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-	vars := mux.Vars(r)
-	err = a.db.UpdateItemsHolder(a.ctx, vars["id"], &uh)
-	if err != nil {
-		a.logger.Info(err)
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-	w.WriteHeader(http.StatusOK)
-}
 
 func (a *Api) AddItemsCatalog(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
@@ -174,9 +176,11 @@ func (a *Api) AddItemsCatalog(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
+
 	type arrRegNum struct {
 		RegNums []string `json:"regNums"`
 	}
+
 	var regNums arrRegNum
 	err = json.Unmarshal(body, &regNums)
 	if err != nil {
@@ -184,38 +188,64 @@ func (a *Api) AddItemsCatalog(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
+
 	var resp *http.Response
-	reg, err := regexp.Compile("[A-Z][0-9]{3}[A-Z]{2}[0-9]{2}[0-9]?")
+	reg, err := regexp.Compile("[A-Z][0-9]{3}[A-Z]{2}[0-9]{2}[0-9]?$")
 	if err != nil {
 		a.logger.Info(err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
+
 	for _, el := range regNums.RegNums { 
 		if !reg.MatchString(el){
 			a.logger.Info(errors.New("Number "+el+ " no validation"))
 		    w.WriteHeader(http.StatusBadRequest)
 			continue
 		}
-		resp, err = http.Get(a.urlApiCarInfo + el)
+		resp, err = http.Get(a.urlApiCarInfo + "/info?regNum=" + el)
 		if err != nil {
 			a.logger.Info(err)
 			w.WriteHeader(http.StatusBadGateway)
 			return
 		}
+
+		if resp.StatusCode != http.StatusOK{
+			a.logger.Info("Ошибка на стороннем сервере")
+			w.WriteHeader(resp.StatusCode)
+			return
+		}
+
 		body, err = io.ReadAll(resp.Body)
 		if err != nil {
 			a.logger.Info(err)
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
+
+		if len(body) == 0 {
+			a.logger.Info("Автомобиля с номером " + el + " нет в базе")
+			fmt.Fprintf(w, "Error: %s", "Автомобиля с номером " + el + " нет в базе")
+			continue
+		}
 		var Item database.ItemsCatalog
 		err = json.Unmarshal(body, &Item)
 		if err != nil {
-			a.logger.Info(err)
-			w.WriteHeader(http.StatusBadRequest)
+			a.logger.Error(err)
+			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
+
+		if Item.Year != 0 && (Item.Year/1000 == 0 || Item.Year > time.Now().Year()){
+			a.logger.Info(errors.New("No-correct data "+ el + " no validation"))
+		    w.WriteHeader(http.StatusBadRequest)
+			continue
+		} else if Item.Brand == "" || Item.Model == "" || Item.Owner.Name == "" || Item.Owner.Surname == "" {
+			a.logger.Info(errors.New("No-correct data "+ el + " no validation"))
+		    w.WriteHeader(http.StatusBadRequest)
+			continue
+		} 
+		
 		err = a.db.AddItemsHolder(a.ctx, &Item)
 		if err != nil {
 			a.logger.Info(err)
@@ -226,39 +256,34 @@ func (a *Api) AddItemsCatalog(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 }
 
-func (a *Api) PageBrand(w http.ResponseWriter, r *http.Request) {
+func (a *Api) GetFilters(w http.ResponseWriter, r *http.Request){
 	w.Header().Set("Content-Type", "application/json")
-	brands, err := a.db.IssuanceBrand(a.ctx)
+	filters, err := a.db.IssuanceFilters(a.ctx)
 	if err != nil {
 		a.logger.Info(err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	brandsJson, err := json.Marshal(brands)
+
+	filtersJSON, err := json.Marshal(filters)
 	if err != nil {
 		a.logger.Info(err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	w.Write(brandsJson)
-	w.WriteHeader(http.StatusOK)
+
+	w.Write(filtersJSON)
 }
 
-func (a *Api) PageModel(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	vars := mux.Vars(r)
-	models, err := a.db.IssuanceModel(a.ctx, vars["brand"])
-	if err != nil {
-		a.logger.Info(err)
-		w.WriteHeader(http.StatusInternalServerError)
-		return
+func checkYear(year string) bool {
+	if len(year) != 4 {
+		return false
 	}
-	modelsJson, err := json.Marshal(models)
-	if err != nil {
-		a.logger.Info(err)
-		w.WriteHeader(http.StatusInternalServerError)
-		return
+
+	for _, el := range year {
+		if !unicode.IsDigit(el){
+			return false
+		}
 	}
-	w.Write(modelsJson)
-	w.WriteHeader(http.StatusOK)
+	return true
 }
