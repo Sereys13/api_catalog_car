@@ -31,10 +31,21 @@ func (d *DB) IssuanceCatalog(ctx context.Context, page, limit int) (pc PageCatal
 
 	defer row.Close()
 	pc.Catalog = make([]Catalog, 0, limit)
-	pc.Catalog, err = pgx.CollectRows(row, pgx.RowToStructByPos[Catalog])
-	if err != nil {
-		d.logger.Info(err)
-		return
+	var c Catalog
+	var yearNull sql.NullInt64
+	for row.Next(){
+		err = row.Scan(&c.Id, &c.RegNum, &c.Brand, &c.Model, &yearNull, &c.FullName)
+		if err != nil {
+			d.logger.Info(err)
+			return
+		}
+
+		if yearNull.Valid{
+			c.Year = int(yearNull.Int64)
+		} else {
+			c.Year = 0
+		}
+		pc.Catalog = append(pc.Catalog, c)
 	}
 
 	if len(pc.Catalog) != 0 {
@@ -54,17 +65,32 @@ func (d *DB) IssuanceCatalogWithFiltr(ctx context.Context, fq *FiltrsQuery) (pc 
 
 	defer conn.Release()
 
-	var queryBrand, queryModel, queryHolder string
+	var queryBrand, queryModel, queryHolder, queryYears string
 	if len(fq.Brands) != 0 {
-		queryBrand = " AND (b.id = " + strings.Join(fq.Brands, " OR b.id = ") + ")"
+		queryBrand = " AND (b.id = " + strings.Join(fq.Brands, " OR b.id = ") + " )"
 	}
 
 	if len(fq.Models) != 0 {
-		queryModel = " AND (m.id = " + strings.Join(fq.Models, " OR m.id = ") + ")"
+		queryModel = " AND (m.id = " + strings.Join(fq.Models, " OR m.id = ") + " )"
 	}
 
 	if len(fq.Holders) != 0 {
-		queryHolder = " AND (cc.holder = " + strings.Join(fq.Holders, " OR cc.holder = ") + ")"
+		queryHolder = " AND (cc.holder = " + strings.Join(fq.Holders, " OR cc.holder = ") + " )"
+	}
+
+	
+	if len(fq.Years) != 0 {
+		if fq.Years[0] == "ravno"{
+			queryYears = " AND (cc.year_issue = " + strings.Join(fq.Years[1:], " OR cc.year_issue = ") + " )"
+		} else if fq.Years[0] == "do"{
+			queryYears = " AND (cc.year_issue <= " + fq.Years[1] + " )"
+		} else {
+			if len(fq.Years) == 3{
+				queryYears = " AND (cc.year_issue >= " + fq.Years[1] + " AND cc.year_issue <= " + fq.Years[2] + " )"
+			} else {
+				queryYears = " AND (cc.year_issue >= " + fq.Years[1] + " )"
+			}
+		}
 	}
 
 	sort := "AND cc.id > $1 ORDER BY cc.id ASC LIMIT $2"
@@ -73,7 +99,7 @@ func (d *DB) IssuanceCatalogWithFiltr(ctx context.Context, fq *FiltrsQuery) (pc 
 			JOIN brand b ON cc.brand = b.id 
 			JOIN model m ON cc.model = m.id 
 			JOIN holder h ON cc.holder = h.id 
-			WHERE cc.delete_status = false` + queryBrand + queryModel + queryHolder + sort, 
+			WHERE cc.delete_status = false` + queryBrand + queryModel + queryHolder + queryYears + sort, 
 			fq.Page, fq.Limit)
 	if err != nil {
 		d.logger.Info(err)
@@ -82,10 +108,21 @@ func (d *DB) IssuanceCatalogWithFiltr(ctx context.Context, fq *FiltrsQuery) (pc 
 
 	defer row.Close()
 	pc.Catalog = make([]Catalog, 0, fq.Limit)
-	pc.Catalog, err = pgx.CollectRows(row, pgx.RowToStructByPos[Catalog])
-	if err != nil {
-		d.logger.Info(err)
-		return
+	var c Catalog
+	var yearNull sql.NullInt64
+	for row.Next(){
+		err = row.Scan(&c.Id, &c.RegNum, &c.Brand, &c.Model, &yearNull, &c.FullName)
+		if err != nil {
+			d.logger.Info(err)
+			return
+		}
+
+		if yearNull.Valid{
+			c.Year = int(yearNull.Int64)
+		} else {
+			c.Year = 0
+		}
+		pc.Catalog = append(pc.Catalog, c)
 	}
 
 	if len(pc.Catalog) != 0 {
@@ -173,15 +210,15 @@ func (d *DB) UpdateItems(ctx context.Context, idItems string, newData *UpdateCat
 			return
 		}
 
-		quers = append(quers, "holder = " + strconv.Itoa(qu.Holder))
+		quers = append(quers, "holder = " + strconv.Itoa(qu.Holder) + " ")
 	}
 
 	if newData.RegNum != ""{
-		quers = append(quers, "regnum = '" + newData.RegNum + "'")
+		quers = append(quers, "regnum = '" + newData.RegNum + "' ")
 	}
 
-	if newData.Year != ""{
-		quers = append(quers, "year_issue = '" + newData.Year + "'")
+	if newData.Year != 0{
+		quers = append(quers, "year_issue = " + strconv.Itoa(newData.Year) + " ")
 	}
 
 	query := "UPDATE car_catalog SET " + strings.Join(quers, ",") +" WHERE id = $1"
@@ -253,14 +290,16 @@ func (d *DB) AddItemsHolder(ctx context.Context, items *ItemsCatalog) error {
 		return err
 	}
 
-	var year string
+	var year sql.NullInt64
 	if items.Year == 0 {
-		year = "N/A"
+		year.Valid = false
+		err = conn.QueryRow(ctx, `SELECT id FROM car_catalog WHERE regnum = $1 AND brand = $2 AND model = $3 AND holder = $4 AND year_issue IS NULL`, items.RegNum, idBrand.Int64, idModel.Int64, idHolder.Int64).Scan(&idCarCatalog)
 	} else {
-		year = strconv.Itoa(items.Year)
+		year.Valid = true
+		year.Int64 = int64(items.Year)
+		err = conn.QueryRow(ctx, `SELECT id FROM car_catalog WHERE regnum = $1 AND brand = $2 AND model = $3 AND year_issue = $4 AND holder = $5`, items.RegNum, idBrand.Int64, idModel.Int64, items.Year, idHolder.Int64).Scan(&idCarCatalog)
 	}
 
-	err = conn.QueryRow(ctx, `SELECT id FROM car_catalog WHERE regnum = $1 AND brand = $2 AND model = $3 AND year_issue = $4 AND holder = $5`, items.RegNum, idBrand.Int64, idModel.Int64, year, idHolder.Int64).Scan(&idCarCatalog)
 	if !idCarCatalog.Valid{
 		_, err = conn.Exec(ctx, `INSERT INTO car_catalog (regnum, brand, model, year_issue, holder) VALUES ($1, $2, $3, $4, $5)`, items.RegNum, idBrand.Int64, idModel.Int64, year, idHolder.Int64)
 	} else {

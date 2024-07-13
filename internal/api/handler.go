@@ -10,7 +10,6 @@ import (
 	"regexp"
 	"strconv"
 	"time"
-	"unicode"
 
 	"github.com/gorilla/mux"
 )
@@ -81,6 +80,38 @@ func (a *Api) PageCatalogGet(w http.ResponseWriter, r *http.Request) {
 			fq.Holders = holders
 		}
 
+		if years, ok := params["year"]; ok {
+			if years[0] == "ot" {
+				if len(years) < 2 || len(years) > 3{
+					err = errors.New("параметр year тип ot может содержать не больше трех значений")
+				}
+			} else if years[0] == "do" {
+				if len(years) < 2 || len(years) > 3{
+					err = errors.New("параметр year тип do может содержать не больше двух значений")
+				}
+			} else if years[0] != "ravno"{
+				err = errors.New("неизвестный тип параметра year")
+			}
+
+			if err != nil {
+				a.logger.Error(err)
+				w.WriteHeader(http.StatusBadRequest)
+				fmt.Fprintf(w, "Error: %s", "Некорретный параметр запроса year")
+				return
+			}
+
+			for _, el := range years[1:]{
+				_, err = strconv.Atoi(el)
+				if err != nil {
+					a.logger.Error(err)
+					w.WriteHeader(http.StatusBadRequest)
+					fmt.Fprintf(w, "Error: %s", "Некорретный параметр запроса year")
+					return
+				}
+			}
+			fq.Years = years
+		}
+
 		catalog, err = a.db.IssuanceCatalogWithFiltr(a.ctx, &fq)
 	} else {
 		catalog, err = a.db.IssuanceCatalog(a.ctx, p, limit)
@@ -138,7 +169,7 @@ func (a *Api) PutCatalog(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		fmt.Fprintf(w, "Error: %s", "Для смены владельца поля имя и фамилия должны быть заполнены")
 		return
-	} else if data.Year != "" && !checkYear(data.Year){
+	} else if data.Year != 0 && (data.Year < 1900 || data.Year > time.Now().Year()){
 		w.WriteHeader(http.StatusBadRequest)
 		fmt.Fprintf(w, "Error: %s", "Год выпуска не корректен")
 		return
@@ -228,6 +259,7 @@ func (a *Api) AddItemsCatalog(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintf(w, "Error: %s", "Автомобиля с номером " + el + " нет в базе")
 			continue
 		}
+
 		var Item database.ItemsCatalog
 		err = json.Unmarshal(body, &Item)
 		if err != nil {
@@ -236,11 +268,11 @@ func (a *Api) AddItemsCatalog(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if Item.Year != 0 && (Item.Year/1000 == 0 || Item.Year > time.Now().Year()){
-			a.logger.Info(errors.New("No-correct data "+ el + " no validation"))
+		if Item.Year != 0 && (Item.Year < 1900 || Item.Year > time.Now().Year()){
+			a.logger.Info(errors.New("No-correct year "+ el + " no validation"))
 		    w.WriteHeader(http.StatusBadRequest)
 			continue
-		} else if Item.Brand == "" || Item.Model == "" || Item.Owner.Name == "" || Item.Owner.Surname == "" {
+		} else if Item.Brand == "" || Item.Model == "" || Item.Owner.Name == "" || Item.Owner.Surname == "" || el != Item.RegNum {
 			a.logger.Info(errors.New("No-correct data "+ el + " no validation"))
 		    w.WriteHeader(http.StatusBadRequest)
 			continue
@@ -275,15 +307,3 @@ func (a *Api) GetFilters(w http.ResponseWriter, r *http.Request){
 	w.Write(filtersJSON)
 }
 
-func checkYear(year string) bool {
-	if len(year) != 4 {
-		return false
-	}
-
-	for _, el := range year {
-		if !unicode.IsDigit(el){
-			return false
-		}
-	}
-	return true
-}

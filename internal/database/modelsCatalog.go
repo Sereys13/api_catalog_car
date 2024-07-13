@@ -5,7 +5,7 @@ type Catalog struct {
 	RegNum   string `json:"regNum"`
 	Brand    string `json:"brand"`
 	Model    string `json:"model"`
-	Year     string `json:"year"`
+	Year     int `json:"year,omitempty"`
 	FullName string `json:"FullName"`
 }
 
@@ -13,20 +13,6 @@ type PageCatalog struct {
 	LastInd int       `json:"lastInd"`
 	Catalog []Catalog `json:"catalog"`
 }
-
-type UpdateRegNum struct {
-	RegNum string `json:"regNum"`
-}
-
-type UpdateBrandModel struct {
-	Brand string `json:"brand"`
-	Model string `json:"model"`
-}
-
-type UpdateYear struct {
-	Year string `json:"year"`
-}
-
 
 type People struct {
 	Name       string `json:"name"`
@@ -42,26 +28,16 @@ type ItemsCatalog struct {
 	Owner  People `json:"owner"`
 }
 
-type Brand struct {
-	Id   int    `json:"id"`
-	Name string `json:"name"`
-}
-
 type Model struct {
 	Id   int    `json:"id"`
 	Name string `json:"name"`
-}
-
-type IdObject struct{
-	IdBrand string
-	IdModel string
 }
 
 type UpdateCatalog struct{
 	RegNum string `json:"regNum"`
 	Brand string `json:"brand"`
 	Model string `json:"model"`
-	Year string `json:"year"`
+	Year int `json:"year"`
 	Name       string `json:"name"`
 	Surname    string `json:"surname"`
 	Patronymic string `json:"patronymic,omitempty"`
@@ -96,4 +72,5 @@ type FiltrsQuery struct{
 	Brands []string
 	Models []string
 	Holders []string
+	Years []string
 }
